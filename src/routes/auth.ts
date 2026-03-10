@@ -34,11 +34,20 @@ const verificationCodes = new Map<string, { code: string; expiresAt: number }>()
  *         description: 전화번호 누락
  */
 router.post('/send-code', async (req: Request, res: Response) => {
-  const { phone } = req.body;
+  const { phone, type } = req.body;
 
   if (!phone) {
     res.status(400).json({ success: false, message: '전화번호를 입력해주세요.' });
     return;
+  }
+
+  // 로그인 시 가입 여부 확인
+  if (type !== 'signup') {
+    const user = await User.findOne({ phone });
+    if (!user) {
+      res.status(404).json({ success: false, message: '등록되지 않은 번호입니다. 회원가입을 진행해주세요.' });
+      return;
+    }
   }
 
   // 6자리 인증번호 생성
@@ -48,7 +57,7 @@ router.post('/send-code', async (req: Request, res: Response) => {
     expiresAt: Date.now() + 3 * 60 * 1000, // 3분
   });
 
-  // CoolSMS 발송
+  // SMS 발송
   try {
     await sendSMS(phone, `[부동산매물공유] 인증번호: ${code}`);
   } catch (smsError) {
@@ -57,8 +66,7 @@ router.post('/send-code', async (req: Request, res: Response) => {
       res.status(500).json({ success: false, message: 'SMS 발송에 실패했습니다.' });
       return;
     }
-    // 개발 환경에서는 콘솔 출력으로 fallback
-    console.log(`[SMS fallback] ${phone}: ${code}`);
+    console.log(`[DEV fallback] ${phone}: ${code}`);
   }
 
   res.json({ success: true, message: '인증번호가 발송되었습니다.' });
@@ -101,12 +109,12 @@ router.post('/verify', async (req: Request, res: Response) => {
 
   verificationCodes.delete(phone);
 
-  // 기존 유저 조회 또는 신규 생성
-  let user = await User.findOne({ phone });
-  const isNewUser = !user;
+  // 기존 유저 조회
+  const user = await User.findOne({ phone });
 
   if (!user) {
-    user = await User.create({ phone });
+    res.status(404).json({ success: false, message: '등록되지 않은 회원입니다. 회원가입을 진행해주세요.' });
+    return;
   }
 
   const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET!, {
@@ -115,7 +123,60 @@ router.post('/verify', async (req: Request, res: Response) => {
 
   res.json({
     success: true,
-    data: { token, user, isNewUser },
+    data: { token, user },
+  });
+});
+
+/**
+ * @openapi
+ * /api/auth/signup-verify:
+ *   post:
+ *     tags: [인증]
+ *     summary: 회원가입 인증번호 확인 + 회원 생성
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [phone, code]
+ *             properties:
+ *               phone:
+ *                 type: string
+ *               code:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: 회원가입 성공
+ *       400:
+ *         description: 인증번호 불일치 또는 이미 가입된 번호
+ */
+router.post('/signup-verify', async (req: Request, res: Response) => {
+  const { phone, code } = req.body;
+
+  const stored = verificationCodes.get(phone);
+  if (!stored || stored.code !== code || stored.expiresAt < Date.now()) {
+    res.status(400).json({ success: false, message: '인증번호가 올바르지 않습니다.' });
+    return;
+  }
+
+  verificationCodes.delete(phone);
+
+  const existingUser = await User.findOne({ phone });
+  if (existingUser) {
+    res.status(400).json({ success: false, message: '이미 가입된 번호입니다. 로그인을 이용해주세요.' });
+    return;
+  }
+
+  const user = await User.create({ phone });
+
+  const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET!, {
+    expiresIn: '30d',
+  });
+
+  res.json({
+    success: true,
+    data: { token, user, isNewUser: true },
   });
 });
 
