@@ -4,7 +4,9 @@ export interface GeocodingResult {
 }
 
 export async function geocodeAddress(address: string): Promise<GeocodingResult | null> {
-  const url = `https://dapi.kakao.com/v2/local/search/address.json?query=${encodeURIComponent(address)}`;
+  // 괄호 부분 제거 (예: "서울시 강남구 역삼동 123 (건물명)" → "서울시 강남구 역삼동 123")
+  const cleanAddress = address.replace(/\s*\(.*?\)\s*$/, '').trim();
+  const url = `https://dapi.kakao.com/v2/local/search/address.json?query=${encodeURIComponent(cleanAddress)}`;
 
   const response = await fetch(url, {
     headers: {

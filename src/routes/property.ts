@@ -48,11 +48,31 @@ const router = Router();
  *         description: 매물 목록
  */
 router.get('/', async (req: AuthRequest, res: Response) => {
-  const { lat, lng, radius = '5', type, page = '1', limit = '20' } = req.query;
+  const {
+    lat, lng, radius = '5',
+    type, dealType, keyword,
+    sort = 'newest',
+    priceMin, priceMax,
+    page = '1', limit = '20',
+  } = req.query;
   const skip = (Number(page) - 1) * Number(limit);
 
   const filter: any = { status: 'active' };
   if (type) filter.type = type;
+
+  // 거래 유형 필터 (price 필드에 "매매", "전세", "월세" 포함)
+  if (dealType === 'sale') filter.price = { ...filter.price, $regex: '^매매' };
+  else if (dealType === 'jeonse') filter.price = { ...filter.price, $regex: '^전세' };
+  else if (dealType === 'monthly') filter.price = { ...filter.price, $regex: '^월세' };
+
+  // 키워드 검색 (제목 또는 주소)
+  if (keyword) {
+    const kw = String(keyword).trim();
+    filter.$or = [
+      { title: { $regex: kw, $options: 'i' } },
+      { address: { $regex: kw, $options: 'i' } },
+    ];
+  }
 
   // 위치 기반 필터링 (간단한 범위 쿼리)
   if (lat && lng) {
@@ -61,12 +81,17 @@ router.get('/', async (req: AuthRequest, res: Response) => {
     filter.lng = { $gte: Number(lng) - r, $lte: Number(lng) + r };
   }
 
+  // 정렬
+  let sortOption: any = { createdAt: -1 };
+  if (sort === 'price_asc') sortOption = { price: 1 };
+  else if (sort === 'price_desc') sortOption = { price: -1 };
+
   const [properties, total] = await Promise.all([
     Property.find(filter)
       .populate('userId', 'name agencyName')
       .skip(skip)
       .limit(Number(limit))
-      .sort({ createdAt: -1 }),
+      .sort(sortOption),
     Property.countDocuments(filter),
   ]);
 

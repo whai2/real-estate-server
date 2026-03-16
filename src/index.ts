@@ -1,8 +1,10 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 
-import dotenv from 'dotenv';
 import swaggerUi from 'swagger-ui-express';
 
 import connectToMongoDB from './db/connectToMongoDB';
@@ -21,8 +23,6 @@ import { errorHandler } from './middleware/errorHandler';
 import { swaggerSpec } from './swagger';
 
 import './models/Comment'; // Comment 모델 등록
-
-dotenv.config();
 
 app.use(helmet());
 app.use(cors());

@@ -1,5 +1,15 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 
+export interface IUnit {
+  floor: string;
+  unitNumber: string;
+  area?: number;
+  rooms?: number;
+  price?: string;
+  deposit?: string;
+  monthlyRent?: string;
+}
+
 export interface IProperty extends Document {
   userId: Types.ObjectId;
   type: 'open' | 'general';
@@ -13,12 +23,26 @@ export interface IProperty extends Document {
   area?: number;
   floor?: string;
   rooms?: number;
+  units: IUnit[];
   description?: string;
   images: { url: string; order: number }[];
   status: string;
   createdAt: Date;
   updatedAt: Date;
 }
+
+const unitSchema = new Schema<IUnit>(
+  {
+    floor: { type: String, required: true },
+    unitNumber: { type: String, required: true },
+    area: { type: Number },
+    rooms: { type: Number },
+    price: { type: String },
+    deposit: { type: String },
+    monthlyRent: { type: String },
+  },
+  { _id: false }
+);
 
 const propertySchema = new Schema<IProperty>(
   {
@@ -34,6 +58,7 @@ const propertySchema = new Schema<IProperty>(
     area: { type: Number },
     floor: { type: String },
     rooms: { type: Number },
+    units: [unitSchema],
     description: { type: String },
     images: [
       {
