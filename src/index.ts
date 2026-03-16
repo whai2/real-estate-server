@@ -24,8 +24,11 @@ import { swaggerSpec } from './swagger';
 
 import './models/Comment'; // Comment 모델 등록
 
+app.use(cors({
+  origin: true,
+  credentials: true,
+}));
 app.use(helmet());
-app.use(cors());
 app.use(express.json());
 
 // Swagger
