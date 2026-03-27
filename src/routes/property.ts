@@ -10,85 +10,48 @@ const router = Router();
  * /api/properties:
  *   get:
  *     tags: [매물]
- *     summary: 매물 목록 조회 (위치 기반)
- *     parameters:
- *       - in: query
- *         name: lat
- *         schema:
- *           type: number
- *         description: 위도
- *       - in: query
- *         name: lng
- *         schema:
- *           type: number
- *         description: 경도
- *       - in: query
- *         name: radius
- *         schema:
- *           type: number
- *           default: 5
- *         description: 반경 (km)
- *       - in: query
- *         name: type
- *         schema:
- *           type: string
- *           enum: [open, general]
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           default: 1
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 20
- *     responses:
- *       200:
- *         description: 매물 목록
+ *     summary: 매물 목록 조회 (위치/키워드/필터)
  */
 router.get('/', async (req: AuthRequest, res: Response) => {
   const {
     lat, lng, radius = '5',
-    type, dealType, keyword,
+    type, propertyType, keyword, status,
     sort = 'newest',
     priceMin, priceMax,
     page = '1', limit = '20',
   } = req.query;
   const skip = (Number(page) - 1) * Number(limit);
 
-  const filter: any = { status: 'active' };
+  const filter: any = { status: status || 'active' };
   if (type) filter.type = type;
+  if (propertyType) filter.propertyType = propertyType;
 
-  // 거래 유형 필터 (price 필드에 "매매", "전세", "월세" 포함)
-  if (dealType === 'sale') filter.price = { ...filter.price, $regex: '^매매' };
-  else if (dealType === 'jeonse') filter.price = { ...filter.price, $regex: '^전세' };
-  else if (dealType === 'monthly') filter.price = { ...filter.price, $regex: '^월세' };
-
-  // 키워드 검색 (제목 또는 주소)
   if (keyword) {
     const kw = String(keyword).trim();
     filter.$or = [
       { title: { $regex: kw, $options: 'i' } },
       { address: { $regex: kw, $options: 'i' } },
+      { description: { $regex: kw, $options: 'i' } },
+      { memo: { $regex: kw, $options: 'i' } },
     ];
   }
 
-  // 위치 기반 필터링 (간단한 범위 쿼리)
   if (lat && lng) {
-    const r = Number(radius) / 111; // km -> 위경도 근사 변환
+    const r = Number(radius) / 111;
     filter.lat = { $gte: Number(lat) - r, $lte: Number(lat) + r };
     filter.lng = { $gte: Number(lng) - r, $lte: Number(lng) + r };
   }
 
-  // 정렬
   let sortOption: any = { createdAt: -1 };
-  if (sort === 'price_asc') sortOption = { price: 1 };
-  else if (sort === 'price_desc') sortOption = { price: -1 };
+  if (sort === 'price_asc') sortOption = { 'trades.0.price': 1 };
+  else if (sort === 'price_desc') sortOption = { 'trades.0.price': -1 };
+  else if (sort === 'updated') sortOption = { updatedAt: -1 };
+  else if (sort === 'name') sortOption = { title: 1 };
 
   const [properties, total] = await Promise.all([
     Property.find(filter)
       .populate('userId', 'name agencyName')
+      .populate('groupId', 'name')
       .skip(skip)
       .limit(Number(limit))
       .sort(sortOption),
@@ -103,39 +66,75 @@ router.get('/', async (req: AuthRequest, res: Response) => {
  * /api/properties/my:
  *   get:
  *     tags: [매물]
- *     summary: 내 매물 목록
+ *     summary: 내 매물 목록 (status, group 필터)
  *     security:
  *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           default: 1
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 20
- *     responses:
- *       200:
- *         description: 내 매물 목록
- *       401:
- *         description: 인증 필요
  */
 router.get('/my', authMiddleware, async (req: AuthRequest, res: Response) => {
-  const { page = '1', limit = '20' } = req.query;
+  const { page = '1', limit = '20', status, groupId, type, keyword } = req.query;
   const skip = (Number(page) - 1) * Number(limit);
 
-  const [properties, total] = await Promise.all([
-    Property.find({ userId: req.userId })
+  const filter: any = { userId: req.userId };
+  if (status) filter.status = status;
+  if (groupId) filter.groupId = groupId;
+  if (type) filter.type = type;
+  if (keyword) {
+    const kw = String(keyword).trim();
+    filter.$or = [
+      { title: { $regex: kw, $options: 'i' } },
+      { address: { $regex: kw, $options: 'i' } },
+    ];
+  }
+
+  const [properties, total, statusCounts] = await Promise.all([
+    Property.find(filter)
+      .populate('groupId', 'name')
       .skip(skip)
       .limit(Number(limit))
       .sort({ createdAt: -1 }),
-    Property.countDocuments({ userId: req.userId }),
+    Property.countDocuments(filter),
+    Property.aggregate([
+      { $match: { userId: req.userId } },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]),
   ]);
 
-  res.json({ success: true, data: { properties, total, page: Number(page) } });
+  // 타입별 카운트
+  const typeCounts = await Property.aggregate([
+    { $match: { userId: req.userId, status: { $ne: 'deleted' } } },
+    { $group: { _id: '$type', count: { $sum: 1 } } },
+  ]);
+
+  res.json({
+    success: true,
+    data: { properties, total, page: Number(page), statusCounts, typeCounts },
+  });
+});
+
+/**
+ * @openapi
+ * /api/properties/geo-search:
+ *   get:
+ *     tags: [매물]
+ *     summary: 지도 영역 기반 매물 검색
+ */
+router.get('/geo-search', async (req: AuthRequest, res: Response) => {
+  const { swLat, swLng, neLat, neLng, limit = '100' } = req.query;
+
+  if (!swLat || !swLng || !neLat || !neLng) {
+    res.status(400).json({ success: false, message: 'bounds 파라미터가 필요합니다.' });
+    return;
+  }
+
+  const properties = await Property.find({
+    status: 'active',
+    lat: { $gte: Number(swLat), $lte: Number(neLat) },
+    lng: { $gte: Number(swLng), $lte: Number(neLng) },
+  })
+    .select('title address lat lng propertyType trades rooms bathrooms score riskLevel photos type')
+    .limit(Number(limit));
+
+  res.json({ success: true, data: properties });
 });
 
 /**
@@ -144,23 +143,11 @@ router.get('/my', authMiddleware, async (req: AuthRequest, res: Response) => {
  *   get:
  *     tags: [매물]
  *     summary: 매물 상세 조회
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: 매물 상세 정보
- *       404:
- *         description: 매물을 찾을 수 없음
  */
 router.get('/:id', async (req: AuthRequest, res: Response) => {
-  const property = await Property.findById(req.params.id).populate(
-    'userId',
-    'name agencyName phone'
-  );
+  const property = await Property.findById(req.params.id)
+    .populate('userId', 'name agencyName phone')
+    .populate('groupId', 'name');
 
   if (!property) {
     res.status(404).json({ success: false, message: '매물을 찾을 수 없습니다.' });
@@ -172,69 +159,54 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
 
 /**
  * @openapi
+ * /api/properties/{id}/analysis:
+ *   get:
+ *     tags: [매물]
+ *     summary: 매물 분석 (가격, 시장환경)
+ */
+router.get('/:id/analysis', async (req: AuthRequest, res: Response) => {
+  const property = await Property.findById(req.params.id);
+
+  if (!property) {
+    res.status(404).json({ success: false, message: '매물을 찾을 수 없습니다.' });
+    return;
+  }
+
+  // TODO: 실거래 데이터 연동 시 실제 분석 로직 추가
+  const analysis = {
+    summary: {
+      score: property.score,
+      riskLevel: property.riskLevel,
+      tradeCount: property.trades.length,
+    },
+    priceAnalysis: {
+      currentPrice: property.trades[0]?.price || 0,
+      averagePrice: 0,
+      priceGap: 0,
+      trend: 'stable' as const,
+    },
+    marketEnvironment: {
+      recentTransactions: 0,
+      averageDays: 0,
+      supplyDemand: 'balanced' as const,
+    },
+  };
+
+  res.json({ success: true, data: analysis });
+});
+
+/**
+ * @openapi
  * /api/properties:
  *   post:
  *     tags: [매물]
- *     summary: 매물 등록
+ *     summary: 매물 등록 (확장)
  *     security:
  *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [type, title, address, lat, lng, price]
- *             properties:
- *               type:
- *                 type: string
- *                 enum: [open, general]
- *               title:
- *                 type: string
- *                 example: "강남역 오피스텔 매매"
- *               address:
- *                 type: string
- *                 example: "서울시 강남구 역삼동 123"
- *               lat:
- *                 type: number
- *                 example: 37.4979
- *               lng:
- *                 type: number
- *                 example: 127.0276
- *               price:
- *                 type: string
- *                 example: "3억 5000"
- *               deposit:
- *                 type: string
- *               monthlyRent:
- *                 type: string
- *               area:
- *                 type: number
- *               floor:
- *                 type: string
- *               rooms:
- *                 type: number
- *               description:
- *                 type: string
- *               images:
- *                 type: array
- *                 items:
- *                   type: object
- *                   properties:
- *                     url:
- *                       type: string
- *                     order:
- *                       type: number
- *     responses:
- *       201:
- *         description: 매물 등록 성공
- *       401:
- *         description: 인증 필요
  */
 router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   let { lat, lng, address, ...rest } = req.body;
 
-  // 주소가 있고 좌표가 없으면 Kakao Geocoding으로 변환
   if (address && (!lat || !lng)) {
     const coords = await geocodeAddress(address);
     if (coords) {
@@ -249,6 +221,7 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
     lat,
     lng,
     userId: req.userId,
+    lastRefreshedAt: new Date(),
   });
 
   res.status(201).json({ success: true, data: property });
@@ -262,42 +235,6 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
  *     summary: 매물 수정
  *     security:
  *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               title:
- *                 type: string
- *               address:
- *                 type: string
- *               price:
- *                 type: string
- *               deposit:
- *                 type: string
- *               monthlyRent:
- *                 type: string
- *               area:
- *                 type: number
- *               floor:
- *                 type: string
- *               rooms:
- *                 type: number
- *               description:
- *                 type: string
- *     responses:
- *       200:
- *         description: 매물 수정 성공
- *       403:
- *         description: 권한 없음
  */
 router.put('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   const property = await Property.findById(req.params.id);
@@ -307,11 +244,129 @@ router.put('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
     return;
   }
 
-  const updated = await Property.findByIdAndUpdate(req.params.id, req.body, {
-    new: true,
-  });
-
+  const updated = await Property.findByIdAndUpdate(req.params.id, req.body, { new: true });
   res.json({ success: true, data: updated });
+});
+
+/**
+ * @openapi
+ * /api/properties/{id}/status:
+ *   patch:
+ *     tags: [매물]
+ *     summary: 매물 상태 변경 (active/hidden/completed/deleted)
+ *     security:
+ *       - bearerAuth: []
+ */
+router.patch('/:id/status', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const { status } = req.body;
+  const property = await Property.findById(req.params.id);
+
+  if (!property || property.userId.toString() !== req.userId) {
+    res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    return;
+  }
+
+  property.status = status;
+  await property.save();
+  res.json({ success: true, data: property });
+});
+
+/**
+ * @openapi
+ * /api/properties/{id}/refresh:
+ *   patch:
+ *     tags: [매물]
+ *     summary: 매물 갱신 (자동숨김 방지)
+ *     security:
+ *       - bearerAuth: []
+ */
+router.patch('/:id/refresh', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const property = await Property.findById(req.params.id);
+
+  if (!property || property.userId.toString() !== req.userId) {
+    res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    return;
+  }
+
+  property.lastRefreshedAt = new Date();
+  property.autoHideAt = undefined;
+  if (property.status === 'autoHide') {
+    property.status = 'active';
+  }
+  await property.save();
+  res.json({ success: true, data: property });
+});
+
+/**
+ * @openapi
+ * /api/properties/batch-refresh:
+ *   post:
+ *     tags: [매물]
+ *     summary: 매물 일괄 갱신
+ *     security:
+ *       - bearerAuth: []
+ */
+router.post('/batch-refresh', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const result = await Property.updateMany(
+    { userId: req.userId, status: { $in: ['active', 'autoHide'] } },
+    {
+      $set: { lastRefreshedAt: new Date(), autoHideAt: undefined },
+    }
+  );
+
+  // autoHide 상태인 것들을 active로 복구
+  await Property.updateMany(
+    { userId: req.userId, status: 'autoHide' },
+    { $set: { status: 'active' } }
+  );
+
+  res.json({ success: true, data: { modifiedCount: result.modifiedCount } });
+});
+
+/**
+ * @openapi
+ * /api/properties/{id}/group:
+ *   patch:
+ *     tags: [매물]
+ *     summary: 매물 그룹 할당
+ *     security:
+ *       - bearerAuth: []
+ */
+router.patch('/:id/group', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const { groupId } = req.body;
+  const property = await Property.findById(req.params.id);
+
+  if (!property || property.userId.toString() !== req.userId) {
+    res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    return;
+  }
+
+  property.groupId = groupId || undefined;
+  await property.save();
+  res.json({ success: true, data: property });
+});
+
+/**
+ * @openapi
+ * /api/properties/{id}/memo:
+ *   patch:
+ *     tags: [매물]
+ *     summary: 관리메모 수정
+ *     security:
+ *       - bearerAuth: []
+ */
+router.patch('/:id/memo', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const { memo } = req.body;
+  const property = await Property.findById(req.params.id);
+
+  if (!property || property.userId.toString() !== req.userId) {
+    res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    return;
+  }
+
+  property.memo = memo;
+  await property.save();
+  res.json({ success: true, data: property });
 });
 
 /**
@@ -319,20 +374,9 @@ router.put('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
  * /api/properties/{id}:
  *   delete:
  *     tags: [매물]
- *     summary: 매물 삭제
+ *     summary: 매물 삭제 (소프트 삭제)
  *     security:
  *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: 삭제 성공
- *       403:
- *         description: 권한 없음
  */
 router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   const property = await Property.findById(req.params.id);
@@ -342,7 +386,8 @@ router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) =>
     return;
   }
 
-  await Property.findByIdAndDelete(req.params.id);
+  property.status = 'deleted';
+  await property.save();
   res.json({ success: true, message: '삭제되었습니다.' });
 });
 

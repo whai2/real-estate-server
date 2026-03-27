@@ -18,9 +18,17 @@ import favoriteRouter from './routes/favorite';
 import inquiryRouter from './routes/inquiry';
 import uploadRouter from './routes/upload';
 import geocodeRouter from './routes/geocode';
+import openSiteRouter from './routes/openSite';
+import dashboardRouter from './routes/dashboard';
+import propertyGroupRouter from './routes/propertyGroup';
+import formatRouter from './routes/format';
+import purchaseRouter from './routes/purchase';
+import autoNotificationRouter from './routes/autoNotification';
+import settingsRouter from './routes/settings';
 
 import { errorHandler } from './middleware/errorHandler';
 import { swaggerSpec } from './swagger';
+import { startAutoHideScheduler } from './jobs/autoHideScheduler';
 
 import './models/Comment'; // Comment 모델 등록
 
@@ -43,6 +51,13 @@ app.use('/api/favorites', favoriteRouter);
 app.use('/api/inquiries', inquiryRouter);
 app.use('/api/upload', uploadRouter);
 app.use('/api/geocode', geocodeRouter);
+app.use('/api/open-sites', openSiteRouter);
+app.use('/api/dashboard', dashboardRouter);
+app.use('/api/property-groups', propertyGroupRouter);
+app.use('/api/formats', formatRouter);
+app.use('/api/purchase', purchaseRouter);
+app.use('/api/auto-notifications', autoNotificationRouter);
+app.use('/api/settings', settingsRouter);
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -56,5 +71,6 @@ const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
   connectToMongoDB();
+  startAutoHideScheduler();
   console.log(`Server running on port ${PORT}`);
 });

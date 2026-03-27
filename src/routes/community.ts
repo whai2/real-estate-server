@@ -31,12 +31,20 @@ const router = Router();
  *       200:
  *         description: 게시글 목록
  */
-router.get('/', async (req: Request, res: Response) => {
-  const { category, page = '1', limit = '20' } = req.query;
+router.get('/', async (req: AuthRequest, res: Response) => {
+  const { category, keyword, mine, page = '1', limit = '20' } = req.query;
   const skip = (Number(page) - 1) * Number(limit);
 
   const filter: any = {};
   if (category) filter.category = category;
+  if (mine === 'true' && req.userId) filter.userId = req.userId;
+  if (keyword) {
+    const kw = String(keyword).trim();
+    filter.$or = [
+      { title: { $regex: kw, $options: 'i' } },
+      { content: { $regex: kw, $options: 'i' } },
+    ];
+  }
 
   const [posts, total] = await Promise.all([
     Post.find(filter)
@@ -119,9 +127,12 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
  *       404:
  *         description: 게시글을 찾을 수 없음
  */
-router.get('/:id', async (req: Request, res: Response) => {
-  const post = await Post.findById(req.params.id)
-    .populate('userId', 'name agencyName');
+router.get('/:id', async (req: AuthRequest, res: Response) => {
+  const post = await Post.findByIdAndUpdate(
+    req.params.id,
+    { $inc: { viewCount: 1 } },
+    { new: true }
+  ).populate('userId', 'name agencyName');
 
   if (!post) {
     res.status(404).json({ success: false, message: '게시글을 찾을 수 없습니다.' });
@@ -218,7 +229,41 @@ router.post('/:id/comments', authMiddleware, async (req: AuthRequest, res: Respo
     content,
   });
 
+  // commentCount 증가
+  await Post.findByIdAndUpdate(req.params.id, { $inc: { commentCount: 1 } });
+
   res.status(201).json({ success: true, data: comment });
+});
+
+/**
+ * @openapi
+ * /api/community/{id}/like:
+ *   post:
+ *     tags: [커뮤니티]
+ *     summary: 좋아요 토글
+ *     security:
+ *       - bearerAuth: []
+ */
+router.post('/:id/like', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const post = await Post.findById(req.params.id);
+  if (!post) {
+    res.status(404).json({ success: false, message: '게시글을 찾을 수 없습니다.' });
+    return;
+  }
+
+  const userId = req.userId!;
+  const isLiked = post.likedBy.some((id) => id.toString() === userId);
+
+  if (isLiked) {
+    post.likedBy = post.likedBy.filter((id) => id.toString() !== userId) as any;
+    post.likeCount = Math.max(0, post.likeCount - 1);
+  } else {
+    post.likedBy.push(userId as any);
+    post.likeCount += 1;
+  }
+
+  await post.save();
+  res.json({ success: true, data: { liked: !isLiked, likeCount: post.likeCount } });
 });
 
 export default router;

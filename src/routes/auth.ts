@@ -211,14 +211,18 @@ router.post('/signup-verify', async (req: Request, res: Response) => {
  *       404:
  *         description: 사용자를 찾을 수 없음
  */
-router.put('/profile', async (req: Request, res: Response) => {
-  const { userId, name, agencyName, licenseNo } = req.body;
+router.put('/profile', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const { name, agencyName, licenseNo, userType, affiliation, businessCardUrl } = req.body;
 
-  const user = await User.findByIdAndUpdate(
-    userId,
-    { name, agencyName, licenseNo },
-    { new: true }
-  );
+  const updateData: any = {};
+  if (name !== undefined) updateData.name = name;
+  if (agencyName !== undefined) updateData.agencyName = agencyName;
+  if (licenseNo !== undefined) updateData.licenseNo = licenseNo;
+  if (userType !== undefined) updateData.userType = userType;
+  if (affiliation !== undefined) updateData.affiliation = affiliation;
+  if (businessCardUrl !== undefined) updateData.businessCardUrl = businessCardUrl;
+
+  const user = await User.findByIdAndUpdate(req.userId, updateData, { new: true });
 
   if (!user) {
     res.status(404).json({ success: false, message: '사용자를 찾을 수 없습니다.' });
@@ -226,6 +230,30 @@ router.put('/profile', async (req: Request, res: Response) => {
   }
 
   res.json({ success: true, data: user });
+});
+
+/**
+ * @openapi
+ * /api/auth/account:
+ *   delete:
+ *     tags: [인증]
+ *     summary: 회원 탈퇴
+ *     security:
+ *       - bearerAuth: []
+ */
+router.delete('/account', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const user = await User.findById(req.userId);
+  if (!user) {
+    res.status(404).json({ success: false, message: '사용자를 찾을 수 없습니다.' });
+    return;
+  }
+
+  // 관련 데이터 정리 (매물은 삭제 상태로)
+  const Property = (await import('../models/Property')).default;
+  await Property.updateMany({ userId: req.userId }, { status: 'deleted' });
+
+  await User.findByIdAndDelete(req.userId);
+  res.json({ success: true, message: '회원 탈퇴가 완료되었습니다.' });
 });
 
 /**

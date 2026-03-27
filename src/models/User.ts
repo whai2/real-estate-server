@@ -7,6 +7,8 @@ export interface IUser extends Document {
   licenseNo?: string;
   businessCardUrl?: string;
   isApproved: boolean;
+  userType: 'broker' | 'assistant' | 'fieldManager' | 'consultant' | 'owner';
+  affiliation?: string;
   // 구독 정보
   subscription: {
     plan: string;
@@ -14,6 +16,13 @@ export interface IUser extends Document {
     points: number;
     pinCount: number;
     pushCount: number;
+  };
+  // 푸시 설정
+  pushSettings: {
+    property: boolean;
+    transaction: boolean;
+    community: boolean;
+    system: boolean;
   };
   deviceTokens: { token: string; platform: string; createdAt: Date }[];
   createdAt: Date;
@@ -28,12 +37,24 @@ const userSchema = new Schema<IUser>(
     licenseNo: { type: String },
     businessCardUrl: { type: String },
     isApproved: { type: Boolean, default: false },
+    userType: {
+      type: String,
+      enum: ['broker', 'assistant', 'fieldManager', 'consultant', 'owner'],
+      default: 'broker',
+    },
+    affiliation: { type: String },
     subscription: {
       plan: { type: String, default: 'free' },
       expiresAt: { type: Date, default: () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
       points: { type: Number, default: 0 },
       pinCount: { type: Number, default: 0 },
       pushCount: { type: Number, default: 0 },
+    },
+    pushSettings: {
+      property: { type: Boolean, default: true },
+      transaction: { type: Boolean, default: true },
+      community: { type: Boolean, default: true },
+      system: { type: Boolean, default: true },
     },
     deviceTokens: [{
       token: { type: String, required: true },
