@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import User from '../models/User';
 import PurchaseHistory from '../models/PurchaseHistory';
+import PointHistory from '../models/PointHistory';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -60,6 +61,13 @@ router.post('/points', authMiddleware, async (req: AuthRequest, res: Response) =
     description: `포인트 ${option.points.toLocaleString()}P 충전`,
   });
 
+  await PointHistory.create({
+    userId: req.userId,
+    amount: option.points,
+    type: 'charge',
+    description: `포인트 ${option.points.toLocaleString()}P 충전`,
+  });
+
   res.json({ success: true, data: { points: user.subscription.points } });
 });
 
@@ -108,6 +116,13 @@ router.post('/subscription', authMiddleware, async (req: AuthRequest, res: Respo
     amount: days,
     price: option.price,
     description: `${days}일 이용권 구매`,
+  });
+
+  await PointHistory.create({
+    userId: req.userId,
+    amount: -option.price,
+    type: 'use',
+    description: `${days}일 이용권 구매 (${option.price.toLocaleString()}P 차감)`,
   });
 
   res.json({ success: true, data: { subscription: user.subscription } });
@@ -172,6 +187,13 @@ router.post('/notification-option', authMiddleware, async (req: AuthRequest, res
     amount: count,
     price,
     description: `알림옵션 ${type} ${count}회 구매`,
+  });
+
+  await PointHistory.create({
+    userId: req.userId,
+    amount: -price,
+    type: 'use',
+    description: `알림옵션 ${type} ${count}회 구매 (${price.toLocaleString()}P 차감)`,
   });
 
   res.json({ success: true, data: { subscription: user.subscription } });

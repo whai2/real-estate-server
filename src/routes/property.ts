@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import mongoose from 'mongoose';
 import Property from '../models/Property';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { geocodeAddress } from '../services/kakao';
@@ -94,14 +95,14 @@ router.get('/my', authMiddleware, async (req: AuthRequest, res: Response) => {
       .sort({ createdAt: -1 }),
     Property.countDocuments(filter),
     Property.aggregate([
-      { $match: { userId: req.userId } },
+      { $match: { userId: new mongoose.Types.ObjectId(req.userId) } },
       { $group: { _id: '$status', count: { $sum: 1 } } },
     ]),
   ]);
 
   // 타입별 카운트
   const typeCounts = await Property.aggregate([
-    { $match: { userId: req.userId, status: { $ne: 'deleted' } } },
+    { $match: { userId: new mongoose.Types.ObjectId(req.userId), status: { $ne: 'deleted' } } },
     { $group: { _id: '$type', count: { $sum: 1 } } },
   ]);
 

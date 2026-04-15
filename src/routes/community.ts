@@ -237,6 +237,58 @@ router.post('/:id/comments', authMiddleware, async (req: AuthRequest, res: Respo
 
 /**
  * @openapi
+ * /api/community/{postId}/comments/{commentId}:
+ *   put:
+ *     tags: [커뮤니티]
+ *     summary: 댓글 수정
+ *     security:
+ *       - bearerAuth: []
+ */
+router.put('/:id/comments/:commentId', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const { content } = req.body;
+  if (!content) {
+    res.status(400).json({ success: false, message: '내용을 입력해주세요.' });
+    return;
+  }
+
+  const Comment = mongoose.model('Comment');
+  const comment = await Comment.findById(req.params.commentId);
+
+  if (!comment || comment.userId.toString() !== req.userId) {
+    res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    return;
+  }
+
+  comment.content = content;
+  await comment.save();
+  res.json({ success: true, data: comment });
+});
+
+/**
+ * @openapi
+ * /api/community/{postId}/comments/{commentId}:
+ *   delete:
+ *     tags: [커뮤니티]
+ *     summary: 댓글 삭제
+ *     security:
+ *       - bearerAuth: []
+ */
+router.delete('/:id/comments/:commentId', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const Comment = mongoose.model('Comment');
+  const comment = await Comment.findById(req.params.commentId);
+
+  if (!comment || comment.userId.toString() !== req.userId) {
+    res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    return;
+  }
+
+  await Comment.findByIdAndDelete(req.params.commentId);
+  await Post.findByIdAndUpdate(req.params.id, { $inc: { commentCount: -1 } });
+  res.json({ success: true, message: '삭제되었습니다.' });
+});
+
+/**
+ * @openapi
  * /api/community/{id}/like:
  *   post:
  *     tags: [커뮤니티]
