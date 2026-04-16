@@ -50,6 +50,17 @@ router.post('/send-code', async (req: Request, res: Response) => {
     }
   }
 
+  // 테스트 계정 바이패스
+  const TEST_PHONES = ['01099768922'];
+  if (TEST_PHONES.includes(phone)) {
+    verificationCodes.set(phone, {
+      code: '000000',
+      expiresAt: Date.now() + 30 * 60 * 1000,
+    });
+    res.json({ success: true, message: '인증번호가 발송되었습니다.' });
+    return;
+  }
+
   // 6자리 인증번호 생성
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   verificationCodes.set(phone, {

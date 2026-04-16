@@ -1,19 +1,17 @@
 import admin from 'firebase-admin';
+import path from 'path';
+import fs from 'fs';
 
-const isFirebaseConfigured =
-  process.env.FIREBASE_PROJECT_ID &&
-  process.env.FIREBASE_PROJECT_ID !== 'your-firebase-project-id';
+const serviceAccountPath = path.resolve(__dirname, '../../firebase-service-account.json');
+const isFirebaseConfigured = fs.existsSync(serviceAccountPath);
 
 if (!admin.apps.length && isFirebaseConfigured) {
+  const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf-8'));
   admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    }),
+    credential: admin.credential.cert(serviceAccount),
   });
 } else if (!isFirebaseConfigured) {
-  console.warn('[Firebase] 설정이 없어 푸시 알림이 비활성화됩니다.');
+  console.warn('[Firebase] firebase-service-account.json이 없어 비활성화됩니다.');
 }
 
 export interface PushNotificationPayload {
